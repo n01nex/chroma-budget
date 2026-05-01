@@ -66,6 +66,21 @@ func (b *Budget) NewEntry(name string, month int, year int, value float64, cat C
 }
 
 func (b *Budget) NewTarget(name string, year int, value float64, sidePocket float64) error {
+
+	if name == "" {
+		return errors.New("name is empty")
+	}
+
+	if value == 0 || value < 0 {
+		return errors.New("value is zero or negative")
+	}
+	// check if target already exists
+	for _, t := range b.Targets {
+		if t.EntryName == name && t.Year == year {
+			return errors.New("target already exists for this entry and year")
+		}
+	}
+
 	total := b.GetTotal(name, year)
 
 	newTarget := Target{
@@ -96,9 +111,7 @@ func (b *Budget) GetTotal(name string, year int) float64 {
 }
 
 func (b *Budget) RefreshTargets() {
-
-	for _, target := range b.Targets {
-		target.CurrentSum = b.GetTotal(target.EntryName, target.Year)
-
+	for i := range b.Targets {
+		b.Targets[i].CurrentSum = b.GetTotal(b.Targets[i].EntryName, b.Targets[i].Year)
 	}
 }
