@@ -34,12 +34,14 @@ type Entry struct {
 }
 
 type Target struct {
-	ID         uuid.UUID `json:"id"`
-	EntryName  string    `json:"entry_name"`
-	Value      float64   `json:"value"`
-	Year       int       `json:"year"`
-	CurrentSum float64   `json:"current_sum"`
-	SidePocket float64   `json:"side_pocket"`
+	ID              uuid.UUID `json:"id"`
+	EntryName       string    `json:"entry_name"`
+	Value           float64   `json:"value"`
+	Year            int       `json:"year"`
+	CurrentPlanned  float64   `json:"current_planned"`
+	CurrentRealized float64   `json:"current_realized"`
+	SidePocket      float64   `json:"side_pocket"`
+	Remaining       float64   `json:"remaining"`
 }
 
 func (b *Budget) NewEntry(name string, month int, year int, value float64, cat Category, realized bool) error {
@@ -62,6 +64,7 @@ func (b *Budget) NewEntry(name string, month int, year int, value float64, cat C
 		Realized:  realized,
 	}
 	b.Entries = append(b.Entries, entry)
+	b.RefreshTargets()
 	return nil
 }
 
@@ -81,37 +84,42 @@ func (b *Budget) NewTarget(name string, year int, value float64, sidePocket floa
 		}
 	}
 
-	total := b.GetTotal(name, year)
+	cp, cr := b.GetTotal(name, year)
 
 	newTarget := Target{
-		ID:         uuid.New(),
-		EntryName:  name,
-		Value:      value,
-		Year:       year,
-		CurrentSum: total,
-		SidePocket: sidePocket,
+		ID:              uuid.New(),
+		EntryName:       name,
+		Value:           value,
+		Year:            year,
+		CurrentPlanned:  cp,
+		CurrentRealized: cr,
+		SidePocket:      sidePocket,
+		Remaining:       value - cp - cr - sidePocket,
 	}
 	b.Targets = append(b.Targets, newTarget)
-	b.RefreshTargets()
 
 	return nil
 }
 
-func (b *Budget) GetTotal(name string, year int) float64 {
-	var sum float64
+func (b *Budget) GetTotal(name string, year int) (cp, cr float64) {
 	for _, entry := range b.Entries {
 		if entry.Name == name {
 			if entry.MonthYear.Year() == year {
-				sum += entry.Value
+				if entry.Realized {
+					cp += entry.Value
+				} else {
+					cr += entry.Value
+				}
 			}
 		}
 	}
 
-	return sum
+	return cp, cr
 }
 
 func (b *Budget) RefreshTargets() {
 	for i := range b.Targets {
-		b.Targets[i].CurrentSum = b.GetTotal(b.Targets[i].EntryName, b.Targets[i].Year)
+		b.Targets[i].CurrentPlanned, b.Targets[i].CurrentRealized = b.GetTotal(b.Targets[i].EntryName, b.Targets[i].Year)
+		b.Targets[i].Remaining = b.Targets[i].Value - b.Targets[i].CurrentPlanned - b.Targets[i].CurrentRealized - b.Targets[i].SidePocket
 	}
 }
