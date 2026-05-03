@@ -1,7 +1,9 @@
 package Data
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,9 +108,9 @@ func (b *Budget) GetTotal(name string, year int) (cp, cr float64) {
 		if entry.Name == name {
 			if entry.MonthYear.Year() == year {
 				if entry.Realized {
-					cp += entry.Value
-				} else {
 					cr += entry.Value
+				} else {
+					cp += entry.Value
 				}
 			}
 		}
@@ -122,4 +124,49 @@ func (b *Budget) RefreshTargets() {
 		b.Targets[i].CurrentPlanned, b.Targets[i].CurrentRealized = b.GetTotal(b.Targets[i].EntryName, b.Targets[i].Year)
 		b.Targets[i].Remaining = b.Targets[i].Value - b.Targets[i].CurrentPlanned - b.Targets[i].CurrentRealized - b.Targets[i].SidePocket
 	}
+}
+
+func (b *Budget) DeleteEntry(id uuid.UUID) error {
+	for i := range b.Entries {
+		if b.Entries[i].ID == id {
+			b.Entries = append(b.Entries[:i], b.Entries[i+1:]...)
+			b.RefreshTargets()
+			return nil
+		}
+	}
+	return errors.New("entry not found")
+}
+
+func (b *Budget) DeleteTarget(id uuid.UUID) error {
+
+	for i := range b.Targets {
+		if b.Targets[i].ID == id {
+			b.Targets = append(b.Targets[:i], b.Targets[i+1:]...)
+			b.RefreshTargets()
+			return nil
+		}
+	}
+	return errors.New("target not found")
+}
+
+func (b *Budget) SaveToFile(filename string) error {
+	data, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filename, data, 0644)
+}
+
+func LoadFromFile(filename string) (*Budget, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var budget Budget
+	if err := json.Unmarshal(data, &budget); err != nil {
+		return nil, err
+	}
+	return &budget, nil
+
 }

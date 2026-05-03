@@ -2,48 +2,50 @@ package main
 
 import (
 	"StructData/Internal/Data"
-	"fmt"
-
-	"github.com/google/uuid"
+	"StructData/Internal/Service"
+	"path/filepath"
 )
 
+const configFile = "config.json"
+const confDir = ".chroma-budget/"
+
 func main() {
-	newBudget := Data.Budget{
-		ID:      uuid.New(),
-		Name:    "Federico's Budget",
-		Entries: nil,
-		Targets: nil,
+
+	// Initialize app with directory, files or load existing config
+	cfg, appDir, initErr := Service.Init(configFile, confDir)
+	if initErr != nil {
+		panic(initErr)
 	}
 
-	err := newBudget.NewEntry(
-		"Income",
-		1,
-		2026,
-		8750,
-		Data.Income,
-		false)
+	//Load Budget if it exists
+	var budget Data.Budget
+	if cfg.LastBudgetPath != "" {
+		budgetTmp, err := Data.LoadFromFile(cfg.LastBudgetPath)
+		if err != nil {
+			// TODO: INIT NEW BUDGET PROCESS TO BE IMPLEMENTED
+			budget = Data.Budget{}
+		} else {
+			budget = *budgetTmp
+		}
+	}
+
+	//USE BUDGET SECTION - LIVE APP
+
+	// ON CLOSURE: SAVE BUDGET + SAVE CONFIG
+	if cfg.LastBudgetPath == "" {
+		budgetName := budget.Name
+		if budgetName == "" {
+			budgetName = "default" // or generate UUID-based name
+		}
+		cfg.LastBudgetPath = filepath.Join(appDir, budgetName+".json")
+	}
+	err = budget.SaveToFile(cfg.LastBudgetPath)
 	if err != nil {
-		fmt.Println(err)
+		panic(err)
 	}
-
-	err = newBudget.NewTarget(
-		"Income",
-		2026,
-		50000.0,
-		2000.0)
-
-	fmt.Println(newBudget)
-
-	err = newBudget.NewEntry(
-		"Income",
-		2,
-		2026,
-		9000.0,
-		Data.Income,
-		true)
+	err = cfg.Save(filepath.Join(appDir, configFile))
 	if err != nil {
-		fmt.Println(err)
+		panic(err)
 	}
-	fmt.Println("_____")
-	fmt.Println(newBudget)
+
 }
