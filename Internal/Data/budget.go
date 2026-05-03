@@ -150,6 +150,7 @@ func (b *Budget) DeleteTarget(id uuid.UUID) error {
 }
 
 func (b *Budget) SaveToFile(filename string) error {
+	b.UpdatedAt = time.Now()
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err
@@ -169,4 +170,44 @@ func LoadFromFile(filename string) (*Budget, error) {
 	}
 	return &budget, nil
 
+}
+
+func NewBudget(name string) *Budget {
+	budget := Budget{
+		ID:        uuid.New(),
+		Name:      name,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Entries:   []Entry{},
+		Targets:   []Target{},
+	}
+	return &budget
+}
+
+func (b *Budget) UpdateName(name string) {
+	b.Name = name
+}
+func (b *Budget) UpdateEntry(id uuid.UUID, name string, value float64, cat Category, realized bool) {
+	for i := range b.Entries {
+		if b.Entries[i].ID == id {
+			b.Entries[i].Name = name
+			b.Entries[i].Value = value
+			b.Entries[i].Type = cat
+			b.Entries[i].Realized = realized
+			b.RefreshTargets()
+			return
+		}
+	}
+}
+
+func (b *Budget) UpdateTarget(id uuid.UUID, name string, value float64, sidePocket float64) {
+	for i := range b.Targets {
+		if b.Targets[i].ID == id {
+			b.Targets[i].EntryName = name
+			b.Targets[i].Value = value
+			b.Targets[i].SidePocket = sidePocket
+			b.RefreshTargets()
+			return
+		}
+	}
 }

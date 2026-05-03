@@ -28,3 +28,7 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	return &cfg, nil
 }
+
+func (c *Config) SetLastBudgetPath(path string) {
+	c.LastBudgetPath = path
+}

@@ -23,7 +23,7 @@ func main() {
 		budgetTmp, err := Data.LoadFromFile(cfg.LastBudgetPath)
 		if err != nil {
 			// TODO: INIT NEW BUDGET PROCESS TO BE IMPLEMENTED
-			budget = Data.Budget{}
+			budget = *Data.NewBudget("New_Budget")
 		} else {
 			budget = *budgetTmp
 		}
@@ -39,7 +39,7 @@ func main() {
 		}
 		cfg.LastBudgetPath = filepath.Join(appDir, budgetName+".json")
 	}
-	err = budget.SaveToFile(cfg.LastBudgetPath)
+	err := budget.SaveToFile(cfg.LastBudgetPath)
 	if err != nil {
 		panic(err)
 	}
