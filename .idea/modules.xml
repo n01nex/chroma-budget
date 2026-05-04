@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/StructData.iml" filepath="$PROJECT_DIR$/.idea/StructData.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/ChromaBudjet.iml" filepath="$PROJECT_DIR$/.idea/ChromaBudjet.iml" />
     </modules>
   </component>
 </project>

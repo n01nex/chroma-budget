@@ -1,4 +1,4 @@
-# StructData
+# ChromaBudget
 
 Currently Done:
 - Budget Core data structure with creation and deletion of entries and targets
@@ -11,6 +11,7 @@ To Do:
   - [ ] Selection of file loading path to change budget
   - [ ] Creating a new entry can have an option of triggering it for the remainder of the year
   - [ ] TUI with BubbleTea
+  - [ ] Functions RenderTableMonth() to give it a month and a year and it process the TUI for bubbletea format
   - [ ] Lip Gloss UI fanciness
   - [ ] First budget guided creation or manual trigger per year
 - [ ] Additional Quality of Life features
