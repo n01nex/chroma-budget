@@ -3,6 +3,7 @@ package Data
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -27,7 +28,7 @@ type Budget struct {
 }
 
 type Entry struct {
-	ID        uuid.UUID `json:"id"`
+	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	MonthYear time.Time `json:"month_year"`
 	Value     float64   `json:"value"`
@@ -36,14 +37,14 @@ type Entry struct {
 }
 
 type Target struct {
-	ID              uuid.UUID `json:"id"`
-	EntryName       string    `json:"entry_name"`
-	Value           float64   `json:"value"`
-	Year            int       `json:"year"`
-	CurrentPlanned  float64   `json:"current_planned"`
-	CurrentRealized float64   `json:"current_realized"`
-	SidePocket      float64   `json:"side_pocket"`
-	Remaining       float64   `json:"remaining"`
+	ID              string  `json:"id"`
+	EntryName       string  `json:"entry_name"`
+	Value           float64 `json:"value"`
+	Year            int     `json:"year"`
+	CurrentPlanned  float64 `json:"current_planned"`
+	CurrentRealized float64 `json:"current_realized"`
+	SidePocket      float64 `json:"side_pocket"`
+	Remaining       float64 `json:"remaining"`
 }
 
 func (b *Budget) NewEntry(name string, month int, year int, value float64, cat Category, realized bool) error {
@@ -54,11 +55,12 @@ func (b *Budget) NewEntry(name string, month int, year int, value float64, cat C
 	if name == "" {
 		return errors.New("name is empty")
 	}
+	//TODO: CHECK IF ENTRY ALREADY EXISTS
 
 	date := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
-	u := uuid.New()
+
 	entry := Entry{
-		ID:        u,
+		ID:        name + "-" + date.Format("2006-01"),
 		Name:      name,
 		MonthYear: date,
 		Value:     value,
@@ -89,7 +91,7 @@ func (b *Budget) NewTarget(name string, year int, value float64, sidePocket floa
 	cp, cr := b.GetTotal(name, year)
 
 	newTarget := Target{
-		ID:              uuid.New(),
+		ID:              fmt.Sprintf("%s-%d", name, year),
 		EntryName:       name,
 		Value:           value,
 		Year:            year,
@@ -126,7 +128,7 @@ func (b *Budget) RefreshTargets() {
 	}
 }
 
-func (b *Budget) DeleteEntry(id uuid.UUID) error {
+func (b *Budget) DeleteEntry(id string) error {
 	for i := range b.Entries {
 		if b.Entries[i].ID == id {
 			b.Entries = append(b.Entries[:i], b.Entries[i+1:]...)
@@ -137,7 +139,7 @@ func (b *Budget) DeleteEntry(id uuid.UUID) error {
 	return errors.New("entry not found")
 }
 
-func (b *Budget) DeleteTarget(id uuid.UUID) error {
+func (b *Budget) DeleteTarget(id string) error {
 
 	for i := range b.Targets {
 		if b.Targets[i].ID == id {
@@ -187,7 +189,7 @@ func NewBudget(name string) *Budget {
 func (b *Budget) UpdateName(name string) {
 	b.Name = name
 }
-func (b *Budget) UpdateEntry(id uuid.UUID, name string, value float64, cat Category, realized bool) {
+func (b *Budget) UpdateEntry(id string, name string, value float64, cat Category, realized bool) {
 	for i := range b.Entries {
 		if b.Entries[i].ID == id {
 			b.Entries[i].Name = name
@@ -200,7 +202,7 @@ func (b *Budget) UpdateEntry(id uuid.UUID, name string, value float64, cat Categ
 	}
 }
 
-func (b *Budget) UpdateTarget(id uuid.UUID, name string, value float64, sidePocket float64) {
+func (b *Budget) UpdateTarget(id string, name string, value float64, sidePocket float64) {
 	for i := range b.Targets {
 		if b.Targets[i].ID == id {
 			b.Targets[i].EntryName = name

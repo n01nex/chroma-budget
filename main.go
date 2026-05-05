@@ -3,7 +3,7 @@ package main
 import (
 	"StructData/Internal/Data"
 	"StructData/Internal/Service"
-	"fmt"
+	"StructData/Internal/TUI"
 	"path/filepath"
 )
 
@@ -23,16 +23,16 @@ func main() {
 	if cfg.LastBudgetPath != "" {
 		budgetTmp, err := Data.LoadFromFile(cfg.LastBudgetPath)
 		if err != nil {
-			panic(err)
+			panic(err) // TODO: If error, ask if to create a new budget or load another one
 		}
 		budget = *budgetTmp
 	} else {
-		budget = *testData() //*Data.NewBudget("New_Budget")
+		budget = *testData() //TODO: Create a new Budget Process - Include selection of where to save it
 	}
 
 	//USE BUDGET SECTION - LIVE APP
 
-	fmt.Println(budget.Targets)
+	TUI.RenderTableMonth(&budget, 2, 2026)
 
 	// ON CLOSURE: SAVE BUDGET + SAVE CONFIG
 	if cfg.LastBudgetPath == "" {
