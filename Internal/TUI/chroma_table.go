@@ -27,20 +27,21 @@ type rowData struct {
 
 // chromaModel is the tea.Model for the custom colored table view
 type chromaModel struct {
+	budget        *Data.Budget // Reference to budget data for month navigation
 	month         int
 	year          int
 	rows          []rowData // All data rows including separators and buffer
 	selected      int       // Currently selected row index
-	scrollOffset  int       // For scrolling when rows exceed visible area
+	scrollOffset  int       // For scrolling when rows exceed the visible area
 	visibleHeight int       // Number of visible rows
 	totalIncome   float64   // Total income for normalization
 	totalExpenses float64   // Total expenses for normalization
 	quit          bool      // Flag to signal quit
 }
 
-// RenderCustomTable returns a tea.Model for the new custom colored table view
-func RenderCustomTable(b *Data.Budget, month int, year int) tea.Model {
-	// Collect and categorize entries for the given month/year
+// buildRowsFromBudget extracts and organizes budget entries for a given month/year
+// Returns the rows, total income, and total expenses
+func buildRowsFromBudget(b *Data.Budget, month, year int) ([]rowData, float64, float64) {
 	var incomeRows, mandatoryRows, flexibleRows []rowData
 	var buffer float64
 	var totalIncome, totalExpenses float64
@@ -51,7 +52,7 @@ func RenderCustomTable(b *Data.Budget, month int, year int) tea.Model {
 				Name:       entry.Name,
 				Value:      entry.Value,
 				Category:   entry.Type,
-				Percentage: 0, // Will be computed after totals are known
+				Percentage: 0,
 			}
 
 			switch entry.Type {
@@ -75,7 +76,7 @@ func RenderCustomTable(b *Data.Budget, month int, year int) tea.Model {
 	// 1. Income entries
 	rows = append(rows, incomeRows...)
 
-	// 2. Separator after Income (empty row with special handling)
+	// 2. Separator after Income
 	if len(mandatoryRows) > 0 || len(flexibleRows) > 0 || len(incomeRows) > 0 {
 		rows = append(rows, rowData{Name: "─", Value: 0, Category: "Separator", Percentage: 0})
 	}
@@ -99,42 +100,53 @@ func RenderCustomTable(b *Data.Budget, month int, year int) tea.Model {
 	// 7. Buffer line
 	rows = append(rows, rowData{Name: "Buffer", Value: buffer, Category: "Buffer", Percentage: 0})
 
-	// Compute normalized percentages for color intensity
-	// Income: percentage of total income
+	// Compute normalized percentages
 	for i := range rows {
 		if rows[i].Category == Data.Income && totalIncome > 0 {
 			rows[i].Percentage = rows[i].Value / totalIncome
 		}
 	}
-
-	// Mandatory: percentage of total expenses (inverse - higher value = more intense red)
 	for i := range rows {
 		if rows[i].Category == Data.Mandatory && totalExpenses > 0 {
 			rows[i].Percentage = rows[i].Value / totalExpenses
 		}
 	}
-
-	// Flexible: percentage of total expenses (inverse - higher value = darker blue)
 	for i := range rows {
 		if rows[i].Category == Data.Flexible && totalExpenses > 0 {
 			rows[i].Percentage = rows[i].Value / totalExpenses
 		}
 	}
 
-	// Buffer: 0 if zero, non-zero otherwise (handled separately in rendering)
-	_ = buffer // Already set in the buffer row
+	return rows, totalIncome, totalExpenses
+}
+
+// RenderCustomTable returns a tea.Model for the new custom colored table view
+func RenderCustomTable(b *Data.Budget, month int, year int) tea.Model {
+	rows, totalIncome, totalExpenses := buildRowsFromBudget(b, month, year)
 
 	return chromaModel{
+		budget:        b,
 		month:         month,
 		year:          year,
 		rows:          rows,
 		selected:      0,
 		scrollOffset:  0,
-		visibleHeight: 12, // Default, will be updated in Init
+		visibleHeight: 12, // Default, it will be updated in Init
 		totalIncome:   totalIncome,
 		totalExpenses: totalExpenses,
 		quit:          false,
 	}
+}
+
+// reloadRows rebuilds the rows data from the budget for the current month/year
+func (m *chromaModel) reloadRows() {
+	rows, totalIncome, totalExpenses := buildRowsFromBudget(m.budget, m.month, m.year)
+
+	m.rows = rows
+	m.selected = 0
+	m.scrollOffset = 0
+	m.totalIncome = totalIncome
+	m.totalExpenses = totalExpenses
 }
 
 // Init initializes the model
@@ -175,6 +187,26 @@ func (m chromaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scrollOffset = m.selected - m.visibleHeight + 1
 				}
 			}
+
+		case "left", "a", "A":
+			// Navigate to previous month
+			if m.month == 1 {
+				m.month = 12
+				m.year--
+			} else {
+				m.month--
+			}
+			m.reloadRows()
+
+		case "right", "d", "D":
+			// Navigate to next month
+			if m.month == 12 {
+				m.month = 1
+				m.year++
+			} else {
+				m.month++
+			}
+			m.reloadRows()
 
 		case "enter":
 			// Placeholder handler for future row editing
@@ -259,7 +291,7 @@ func (m chromaModel) View() tea.View {
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#888888"))
 
-	helpText := helpStyle.Render("↑/↓ or W/S: Navigate | Enter: Edit | Q: Quit")
+	helpText := helpStyle.Render("↑/↓ or W/S: Navigate rows | ←/→ or A/D: Change month | Enter: Edit | Q: Quit")
 
 	return tea.NewView("\n" + title + "\n" + tableStr + "\n  " + helpText + "\n")
 }
