@@ -43,20 +43,15 @@ type ModalOverlayState struct {
 
 // modalStyle returns the base style for a modal dialog
 func (m ModalConfig) modalStyle() lipgloss.Style {
-	width := 50
-	if len(m.Message) > 40 {
-		width = len(m.Message) + 10
-	}
+	width := 60 // default width, will be overridden by Place
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Height(10).
-		Align(lipgloss.Center).
+		Height(12).
 		Background(lipgloss.Color("#1a1a2e")).
 		Foreground(lipgloss.Color("#eaeaea")).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
-		MarginTop(2)
+		BorderForeground(lipgloss.Color("#7D56F4"))
 }
 
 // titleStyle returns the style for the modal title
@@ -65,16 +60,16 @@ func (m ModalConfig) titleStyle() lipgloss.Style {
 		Bold(true).
 		Foreground(lipgloss.Color("#FAFAFA")).
 		Background(lipgloss.Color("#7D56F4")).
-		Width(m.modalStyle().GetWidth()).
+		Width(60).
 		Align(lipgloss.Center)
 }
 
 // messageStyle returns the style for the modal message
 func (m ModalConfig) messageStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Width(m.modalStyle().GetWidth()).
+		Width(60).
 		Align(lipgloss.Center).
-		MarginTop(2)
+		Foreground(lipgloss.Color("#eaeaea"))
 }
 
 // buttonStyle returns the style for a button based on selection state
@@ -107,8 +102,8 @@ func RenderModal(state ModalOverlayState) string {
 	// Build the modal components
 	title := cfg.titleStyle().Render(cfg.Title)
 
-	// Wrap message if too long
-	message := cfg.messageStyle().Render(wrapMessage(cfg.Message, 45))
+	// Render message - don't pre-wrap, let lipgloss handle width
+	message := cfg.messageStyle().Render(cfg.Message)
 
 	// OK button
 	okButton := buttonStyle(state.Selected == 0).Render("[ OK ]")
@@ -125,43 +120,6 @@ func RenderModal(state ModalOverlayState) string {
 	)
 
 	return cfg.modalStyle().Render(modalBody)
-}
-
-// wrapMessage wraps a message string to fit within a width
-func wrapMessage(msg string, width int) string {
-	if len(msg) <= width {
-		return msg
-	}
-
-	// Simple word wrap
-	words := ""
-	result := ""
-	for i, char := range msg {
-		words += string(char)
-		if (i+1)%width == 0 {
-			result += words + "\n"
-			words = ""
-		}
-	}
-	if len(words) > 0 {
-		result += words
-	}
-	return result
-}
-
-// OverlayDimensions calculates the overlay dimensions based on terminal size
-func OverlayDimensions(terminalWidth, terminalHeight int) (overlayWidth, overlayHeight int) {
-	overlayWidth = 60
-	overlayHeight = 12
-
-	if overlayWidth > terminalWidth-4 {
-		overlayWidth = terminalWidth - 4
-	}
-	if overlayHeight > terminalHeight-4 {
-		overlayHeight = terminalHeight - 4
-	}
-
-	return overlayWidth, overlayHeight
 }
 
 // =============================================================================
@@ -182,13 +140,14 @@ func NewBudgetInfoModal(name string, value float64, category string) ModalOverla
 }
 
 // NewTargetInfoModal creates a modal for displaying target entry info
-func NewTargetInfoModal(name string, remaining float64) ModalOverlayState {
+func NewTargetInfoModal(name string, target, planned, realized, sidePocket, remaining float64) ModalOverlayState {
 	return ModalOverlayState{
 		Active: true,
 		Config: ModalConfig{
-			Title:   "Target Entry Details",
-			Message: fmt.Sprintf("%s\n\nRemaining: %.2f", name, remaining),
-			Type:    InfoModal,
+			Title: "Target Entry Details",
+			Message: fmt.Sprintf("%s\n\nTarget: %.2f\nPlanned: %.2f\nRealized: %.2f\nSide Pocket: %.2f\nRemaining: %.2f",
+				name, target, planned, realized, sidePocket, remaining),
+			Type: InfoModal,
 		},
 		Selected: 0,
 	}

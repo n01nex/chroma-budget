@@ -675,6 +675,10 @@ func (m chromaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						selectedRow := m.rightRows[m.rightSelected]
 						m.modalOverlay = NewTargetInfoModal(
 							selectedRow.Name,
+							selectedRow.Value,
+							selectedRow.CurrentPlanned,
+							selectedRow.CurrentRealized,
+							selectedRow.SidePocket,
 							selectedRow.Remaining,
 						)
 					}
