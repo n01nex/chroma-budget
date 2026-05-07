@@ -59,6 +59,320 @@ type targetRowData struct {
 	Percentage      float64 // Normalized percentage (0-1) for color intensity
 }
 
+// =============================================================================
+// COMPOSABLE VIEWS
+// =============================================================================
+
+// BudgetPanelView is a composable view for the monthly budget panel
+type BudgetPanelView struct {
+	Title         string
+	Rows          []rowData
+	Selected      int
+	ScrollOffset  int
+	VisibleHeight int
+	IsFocused     bool
+	TotalIncome   float64
+	TotalExpenses float64
+}
+
+// NewBudgetPanelView creates a new budget panel view
+func NewBudgetPanelView(title string, rows []rowData, selected, scrollOffset, visibleHeight int, isFocused bool, totalIncome, totalExpenses float64) *BudgetPanelView {
+	return &BudgetPanelView{
+		Title:         title,
+		Rows:          rows,
+		Selected:      selected,
+		ScrollOffset:  scrollOffset,
+		VisibleHeight: visibleHeight,
+		IsFocused:     isFocused,
+		TotalIncome:   totalIncome,
+		TotalExpenses: totalExpenses,
+	}
+}
+
+// Render returns the string representation of the budget panel
+func (v *BudgetPanelView) Render() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).
+		Width(36).
+		Align(lipgloss.Center).
+		MarginBottom(1)
+
+	panelTitle := titleStyle.Render(v.Title)
+
+	// Build table lines
+	var tableLines []string
+
+	// Column headers
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#555555"))
+
+	nameHeader := headerStyle.Width(18).Render("Name")
+	valueHeader := headerStyle.Width(14).Render("Value")
+	tableLines = append(tableLines, nameHeader+" "+valueHeader)
+
+	// Calculate visible range
+	endIndex := v.ScrollOffset + v.VisibleHeight
+	if endIndex > len(v.Rows) {
+		endIndex = len(v.Rows)
+	}
+
+	// Render each visible row
+	for i := v.ScrollOffset; i < endIndex; i++ {
+		row := v.Rows[i]
+		displayIndex := i - v.ScrollOffset
+		isSelected := displayIndex == v.Selected-v.ScrollOffset
+
+		// Handle separators
+		if row.Category == "Separator" {
+			sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+			tableLines = append(tableLines, sepStyle.Render("─"+strings.Repeat("─", 16)+" "+strings.Repeat("─", 12)))
+			continue
+		}
+
+		// Get row style
+		rowStyle := v.getRowStyle(row, isSelected)
+
+		nameContent := rowStyle.Width(18).Render(row.Name)
+		valueContent := rowStyle.Width(14).Render(fmt.Sprintf("%.2f", row.Value))
+
+		tableLines = append(tableLines, nameContent+" "+valueContent)
+	}
+
+	// Add padding rows if needed (to match right panel height)
+	paddingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1a1a"))
+	visibleCount := endIndex - v.ScrollOffset
+	for i := visibleCount; i < v.VisibleHeight; i++ {
+		tableLines = append(tableLines, paddingStyle.Render(" "))
+	}
+
+	// Join table lines - use consistent border style to prevent dimension changes
+	borderColor := lipgloss.Color("240")
+	if v.IsFocused {
+		borderColor = lipgloss.Color("#FFFF00")
+	}
+	tableStr := lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Render(strings.Join(tableLines, "\n"))
+
+	return panelTitle + "\n" + tableStr
+}
+
+// getRowStyle returns the appropriate lipgloss style for a budget row
+func (v *BudgetPanelView) getRowStyle(row rowData, isSelected bool) lipgloss.Style {
+	// Base style with white text
+	baseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
+	var coloredStyle lipgloss.Style
+
+	switch row.Category {
+	case Data.Income:
+		// Green background: intensity scales with percentage (0.2 to 0.9 green)
+		greenIntensity := int(row.Percentage * 255)
+		if greenIntensity > 255 {
+			greenIntensity = 255
+		}
+		if greenIntensity < 50 {
+			greenIntensity = 50
+		}
+		colorHex := fmt.Sprintf("#00%02X00", greenIntensity)
+		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
+
+	case Data.Mandatory:
+		// Red background: intensity increases as value grows relative to total expenses
+		redIntensity := 255 - int(row.Percentage*155)
+		if redIntensity < 100 {
+			redIntensity = 100
+		}
+		colorHex := fmt.Sprintf("#%02X0000", redIntensity)
+		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
+
+	case Data.Flexible:
+		// Blue background: darkens as value rises
+		blueIntensity := 255 - int(row.Percentage*155)
+		if blueIntensity < 100 {
+			blueIntensity = 100
+		}
+		colorHex := fmt.Sprintf("#0000%02X", blueIntensity)
+		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
+
+	case "Buffer":
+		if row.Value != 0 {
+			coloredStyle = baseStyle.Background(lipgloss.Color("#BBBB00"))
+		} else {
+			coloredStyle = baseStyle.Background(lipgloss.Color("#555555"))
+		}
+
+	case "Separator":
+		coloredStyle = baseStyle
+	}
+
+	// Apply selection highlight when active and selected
+	if isSelected {
+		if v.IsFocused {
+			// Focused panel: bright yellow selection
+			style := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#FFFF00")).
+				Bold(true)
+			if row.Realized {
+				style = style.Strikethrough(true)
+			}
+			return style
+		} else {
+			// Unfocused panel but selected: dim highlight
+			style := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#CCCCCC")).
+				Background(lipgloss.Color("#333333"))
+			if row.Realized {
+				style = style.Strikethrough(true)
+			}
+			return style
+		}
+	}
+
+	// Apply strikethrough for realized entries (even when not selected)
+	if row.Realized {
+		coloredStyle = coloredStyle.Strikethrough(true)
+	}
+
+	// No border on individual rows - borders are only on the table container
+	return coloredStyle
+}
+
+// TargetPanelView is a composable view for the yearly targets panel
+type TargetPanelView struct {
+	Title         string
+	Rows          []targetRowData
+	Selected      int
+	ScrollOffset  int
+	VisibleHeight int
+	IsFocused     bool
+}
+
+// NewTargetPanelView creates a new targets panel view
+func NewTargetPanelView(title string, rows []targetRowData, selected, scrollOffset, visibleHeight int, isFocused bool) *TargetPanelView {
+	return &TargetPanelView{
+		Title:         title,
+		Rows:          rows,
+		Selected:      selected,
+		ScrollOffset:  scrollOffset,
+		VisibleHeight: visibleHeight,
+		IsFocused:     isFocused,
+	}
+}
+
+// Render returns the string representation of the targets panel
+func (v *TargetPanelView) Render() string {
+	// Find the max name length for dynamic column sizing
+	maxNameLen := 10 // minimum width
+	for _, row := range v.Rows {
+		if len(row.Name) > maxNameLen {
+			maxNameLen = len(row.Name)
+		}
+	}
+	if maxNameLen > 20 {
+		maxNameLen = 20 // cap at 20
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#F4A556")).
+		Width(maxNameLen + 50).
+		Align(lipgloss.Center).
+		MarginBottom(1)
+
+	panelTitle := titleStyle.Render(v.Title)
+
+	// Build table lines
+	var tableLines []string
+
+	// Column headers
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#555555"))
+
+	nameHeader := headerStyle.Width(maxNameLen).Render("Name")
+	targetHeader := headerStyle.Width(9).Render("Target")
+	plannedHeader := headerStyle.Width(9).Render("Planned")
+	realizedHeader := headerStyle.Width(9).Render("Realized")
+	sidePocketHeader := headerStyle.Width(9).Render("SidePoc")
+	remainingHeader := headerStyle.Width(9).Render("Remaining")
+	tableLines = append(tableLines, nameHeader+" "+targetHeader+" "+plannedHeader+" "+realizedHeader+" "+sidePocketHeader+" "+remainingHeader)
+
+	// Calculate visible range
+	endIndex := v.ScrollOffset + v.VisibleHeight
+	if endIndex > len(v.Rows) {
+		endIndex = len(v.Rows)
+	}
+
+	// Render each visible row
+	for i := v.ScrollOffset; i < endIndex; i++ {
+		row := v.Rows[i]
+		displayIndex := i - v.ScrollOffset
+		isSelected := displayIndex == v.Selected-v.ScrollOffset
+
+		rowStyle := v.getRowStyle(isSelected)
+
+		nameContent := rowStyle.Width(maxNameLen).Render(row.Name)
+		targetContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.Value))
+		plannedContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.CurrentPlanned))
+		realizedContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.CurrentRealized))
+		sidePocketContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.SidePocket))
+		remainingContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.Remaining))
+
+		tableLines = append(tableLines, nameContent+" "+targetContent+" "+plannedContent+" "+realizedContent+" "+sidePocketContent+" "+remainingContent)
+	}
+
+	// Add padding rows if needed (to match left panel height)
+	paddingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1a1a"))
+	visibleCount := endIndex - v.ScrollOffset
+	paddingWidth := maxNameLen + 50 // Total width of all columns plus spaces
+	for i := visibleCount; i < v.VisibleHeight; i++ {
+		tableLines = append(tableLines, paddingStyle.Render(strings.Repeat(" ", paddingWidth)))
+	}
+
+	// Join table lines - use consistent border style to prevent dimension changes
+	borderColor := lipgloss.Color("240")
+	if v.IsFocused {
+		borderColor = lipgloss.Color("#FFFF00")
+	}
+	tableStr := lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Render(strings.Join(tableLines, "\n"))
+
+	return panelTitle + "\n" + tableStr
+}
+
+// getRowStyle returns the appropriate lipgloss style for a target row
+func (v *TargetPanelView) getRowStyle(isSelected bool) lipgloss.Style {
+	baseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
+	// Apply selection highlight when active and selected
+	if isSelected {
+		if v.IsFocused {
+			return lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(lipgloss.Color("#FFFF00")).
+				Bold(true)
+		} else {
+			return lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#CCCCCC")).
+				Background(lipgloss.Color("#333333"))
+		}
+	}
+
+	// No border on individual rows - borders are only on the table container
+	return baseStyle
+}
+
 // chromaModel is the tea.Model for the custom colored dual-panel table view
 type chromaModel struct {
 	budget *Data.Budget // Reference to budget data for month navigation
@@ -84,6 +398,32 @@ type chromaModel struct {
 	// Shared styling data
 	totalIncome   float64
 	totalExpenses float64
+}
+
+// budgetView returns a composable view for the left panel
+func (m *chromaModel) budgetView() *BudgetPanelView {
+	return NewBudgetPanelView(
+		fmt.Sprintf("%s %d", time.Month(m.month).String(), m.year),
+		m.leftRows,
+		m.leftSelected,
+		m.leftScrollOffset,
+		m.leftVisibleHeight,
+		m.activePanel == LeftPanel,
+		m.totalIncome,
+		m.totalExpenses,
+	)
+}
+
+// targetView returns a composable view for the right panel
+func (m *chromaModel) targetView() *TargetPanelView {
+	return NewTargetPanelView(
+		fmt.Sprintf("Targets %d", m.year),
+		m.rightRows,
+		m.rightSelected,
+		m.rightScrollOffset,
+		m.rightVisibleHeight,
+		m.activePanel == RightPanel,
+	)
 }
 
 // =============================================================================
@@ -418,15 +758,13 @@ func (m *chromaModel) clampScrollOffsets() {
 // VIEW RENDERING
 // =============================================================================
 
-// View renders the dual-panel colored table
+// View renders the dual-panel colored table using composable views
 func (m chromaModel) View() tea.View {
-	// Build left panel (monthly budget)
-	leftTitle := fmt.Sprintf("%s %d", time.Month(m.month).String(), m.year)
-	leftView := m.renderBudgetPanel(leftTitle, true)
+	// Build left panel (monthly budget) using composable view
+	leftView := m.budgetView().Render()
 
-	// Build right panel (yearly targets)
-	rightTitle := fmt.Sprintf("Targets %d", m.year)
-	rightView := m.renderTargetPanel(rightTitle, true)
+	// Build right panel (yearly targets) using composable view
+	rightView := m.targetView().Render()
 
 	// Combine panels side by side with padding
 	leftStyled := lipgloss.NewStyle().Render(leftView)
@@ -443,157 +781,6 @@ func (m chromaModel) View() tea.View {
 	helpText := m.renderHelpText()
 
 	return tea.NewView("\n" + combined + "\n" + helpText + "\n")
-}
-
-// renderBudgetPanel renders the left panel (monthly budget entries)
-func (m chromaModel) renderBudgetPanel(title string, isActive bool) string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#7D56F4")).
-		Width(36).
-		Align(lipgloss.Center).
-		MarginBottom(1)
-
-	panelTitle := titleStyle.Render(title)
-
-	// Build table lines
-	var tableLines []string
-
-	// Column headers
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#555555"))
-
-	nameHeader := headerStyle.Width(18).Render("Name")
-	valueHeader := headerStyle.Width(14).Render("Value")
-	tableLines = append(tableLines, nameHeader+" "+valueHeader)
-
-	// Calculate visible range
-	endIndex := m.leftScrollOffset + m.leftVisibleHeight
-	if endIndex > len(m.leftRows) {
-		endIndex = len(m.leftRows)
-	}
-
-	// Render each visible row
-	for i := m.leftScrollOffset; i < endIndex; i++ {
-		row := m.leftRows[i]
-		displayIndex := i - m.leftScrollOffset
-		isSelected := displayIndex == m.leftSelected-m.leftScrollOffset
-
-		// Handle separators
-		if row.Category == "Separator" {
-			sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-			tableLines = append(tableLines, sepStyle.Render("─"+strings.Repeat("─", 16)+" "+strings.Repeat("─", 12)))
-			continue
-		}
-
-		// Get row style
-		rowStyle := m.getBudgetRowStyle(row, isSelected, isActive)
-
-		nameContent := rowStyle.Width(18).Render(row.Name)
-		valueContent := rowStyle.Width(14).Render(fmt.Sprintf("%.2f", row.Value))
-
-		tableLines = append(tableLines, nameContent+" "+valueContent)
-	}
-
-	// Add padding rows if needed (to match right panel height)
-	paddingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1a1a"))
-	visibleCount := endIndex - m.leftScrollOffset
-	for i := visibleCount; i < m.leftVisibleHeight; i++ {
-		tableLines = append(tableLines, paddingStyle.Render(" "))
-	}
-
-	// Join table lines
-	tableStr := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Render(strings.Join(tableLines, "\n"))
-
-	return panelTitle + "\n" + tableStr
-}
-
-// renderTargetPanel renders the right panel (yearly targets)
-func (m chromaModel) renderTargetPanel(title string, isActive bool) string {
-	// Find the max name length for dynamic column sizing
-	maxNameLen := 10 // minimum width
-	for _, row := range m.rightRows {
-		if len(row.Name) > maxNameLen {
-			maxNameLen = len(row.Name)
-		}
-	}
-	if maxNameLen > 20 {
-		maxNameLen = 20 // cap at 20
-	}
-
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#F4A556")).
-		Width(maxNameLen + 50). // Extra width for all columns
-		Align(lipgloss.Center).
-		MarginBottom(1)
-
-	panelTitle := titleStyle.Render(title)
-
-	// Build table lines
-	var tableLines []string
-
-	// Column headers
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#555555"))
-
-	nameHeader := headerStyle.Width(maxNameLen).Render("Name")
-	targetHeader := headerStyle.Width(9).Render("Target")
-	plannedHeader := headerStyle.Width(9).Render("Planned")
-	realizedHeader := headerStyle.Width(9).Render("Realized")
-	sidePocketHeader := headerStyle.Width(9).Render("SidePoc")
-	remainingHeader := headerStyle.Width(9).Render("Remaining")
-	tableLines = append(tableLines, nameHeader+" "+targetHeader+" "+plannedHeader+" "+realizedHeader+" "+sidePocketHeader+" "+remainingHeader)
-
-	// Calculate visible range
-	endIndex := m.rightScrollOffset + m.rightVisibleHeight
-	if endIndex > len(m.rightRows) {
-		endIndex = len(m.rightRows)
-	}
-
-	// Render each visible row
-	for i := m.rightScrollOffset; i < endIndex; i++ {
-		row := m.rightRows[i]
-		displayIndex := i - m.rightScrollOffset
-		isSelected := displayIndex == m.rightSelected-m.rightScrollOffset
-
-		rowStyle := m.getTargetRowStyle(row, isSelected, isActive)
-
-		nameContent := rowStyle.Width(maxNameLen).Render(row.Name)
-		targetContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.Value))
-		plannedContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.CurrentPlanned))
-		realizedContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.CurrentRealized))
-		sidePocketContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.SidePocket))
-		remainingContent := rowStyle.Width(9).Render(fmt.Sprintf("%.2f", row.Remaining))
-
-		tableLines = append(tableLines, nameContent+" "+targetContent+" "+plannedContent+" "+realizedContent+" "+sidePocketContent+" "+remainingContent)
-	}
-
-	// Add padding rows if needed (to match left panel height)
-	paddingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1a1a"))
-	visibleCount := endIndex - m.rightScrollOffset
-	paddingWidth := maxNameLen + 50 // Total width of all columns plus spaces
-	for i := visibleCount; i < m.rightVisibleHeight; i++ {
-		tableLines = append(tableLines, paddingStyle.Render(strings.Repeat(" ", paddingWidth)))
-	}
-
-
-	// Join table lines
-	tableStr := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Render(strings.Join(tableLines, "\n"))
-
-	return panelTitle + "\n" + tableStr
 }
 
 // renderHelpText returns the help text at the bottom of the view
@@ -614,124 +801,6 @@ func (m chromaModel) renderHelpText() string {
 	)
 
 	return "  " + helpText
-}
-
-// =============================================================================
-// STYLING HELPERS
-// =============================================================================
-
-// getBudgetRowStyle returns the appropriate lipgloss style for a budget row
-func (m chromaModel) getBudgetRowStyle(row rowData, isSelected, isActive bool) lipgloss.Style {
-	// Base style with white text
-	baseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-
-	var coloredStyle lipgloss.Style
-
-	switch row.Category {
-	case Data.Income:
-		// Green background: intensity scales with percentage (0.2 to 0.9 green)
-		greenIntensity := int(row.Percentage * 255)
-		if greenIntensity > 255 {
-			greenIntensity = 255
-		}
-		if greenIntensity < 50 {
-			greenIntensity = 50
-		}
-		colorHex := fmt.Sprintf("#00%02X00", greenIntensity)
-		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
-
-	case Data.Mandatory:
-		// Red background: intensity increases as value grows relative to total expenses
-		redIntensity := 255 - int(row.Percentage*155)
-		if redIntensity < 100 {
-			redIntensity = 100
-		}
-		colorHex := fmt.Sprintf("#%02X0000", redIntensity)
-		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
-
-	case Data.Flexible:
-		// Blue background: darkens as value rises
-		blueIntensity := 255 - int(row.Percentage*155)
-		if blueIntensity < 100 {
-			blueIntensity = 100
-		}
-		colorHex := fmt.Sprintf("#0000%02X", blueIntensity)
-		coloredStyle = baseStyle.Background(lipgloss.Color(colorHex))
-
-	case "Buffer":
-		if row.Value != 0 {
-			coloredStyle = baseStyle.Background(lipgloss.Color("#BBBB00"))
-		} else {
-			coloredStyle = baseStyle.Background(lipgloss.Color("#555555"))
-		}
-
-	case "Separator":
-		coloredStyle = baseStyle
-	}
-
-	// Apply selection highlight when active and selected
-	if isSelected {
-		if isActive {
-			// Active panel: bright yellow selection
-			style := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(lipgloss.Color("#FFFF00")).
-				Bold(true)
-			if row.Realized {
-				style = style.Strikethrough(true)
-			}
-			return style
-		} else {
-			// Inactive panel but selected: dim highlight
-			style := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#CCCCCC")).
-				Background(lipgloss.Color("#333333"))
-			if row.Realized {
-				style = style.Strikethrough(true)
-			}
-			return style
-		}
-	}
-
-	// Apply strikethrough for realized entries (even when not selected)
-	if row.Realized {
-		coloredStyle = coloredStyle.Strikethrough(true)
-	}
-
-	// Inactive panel: add subtle border to indicate it's not focused
-	if !isActive {
-		return coloredStyle.BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("236"))
-	}
-
-	return coloredStyle
-}
-
-// getTargetRowStyle returns the appropriate lipgloss style for a target row
-// Note: Currently no background coloring as per requirements
-func (m chromaModel) getTargetRowStyle(row targetRowData, isSelected, isActive bool) lipgloss.Style {
-	baseStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-
-	// Apply selection highlight when active and selected
-	if isSelected {
-		if isActive {
-			return lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(lipgloss.Color("#FFFF00")).
-				Bold(true)
-		} else {
-			return lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#CCCCCC")).
-				Background(lipgloss.Color("#333333"))
-		}
-	}
-
-	if !isActive {
-		return baseStyle.BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("236"))
-	}
-
-	return baseStyle
 }
 
 // =============================================================================
