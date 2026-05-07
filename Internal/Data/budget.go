@@ -189,13 +189,16 @@ func NewBudget(name string) *Budget {
 func (b *Budget) UpdateName(name string) {
 	b.Name = name
 }
-func (b *Budget) UpdateEntry(id string, name string, value float64, cat Category, realized bool) {
+func (b *Budget) UpdateEntry(id string, name string, month int, year int, value float64, cat Category, realized bool) {
+	date := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+
 	for i := range b.Entries {
 		if b.Entries[i].ID == id {
 			b.Entries[i].Name = name
 			b.Entries[i].Value = value
 			b.Entries[i].Type = cat
 			b.Entries[i].Realized = realized
+			b.Entries[i].MonthYear = date
 			b.RefreshTargets()
 			return
 		}

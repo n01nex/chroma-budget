@@ -45,6 +45,7 @@ type rowData struct {
 	Category   Data.Category // Income, Mandatory, Flexible, or "Separator"/"Buffer"
 	Percentage float64       // Normalized percentage (0-1) for color intensity
 	Realized   bool          // Whether this entry has been realized (for strikethrough)
+	MonthYear  time.Time     // The actual month/year of this entry (for edit form correctness)
 }
 
 // targetRowData holds the data for each rendered row in the Targets table
@@ -399,8 +400,11 @@ type chromaModel struct {
 	totalIncome   float64
 	totalExpenses float64
 
-	// Modal overlay state
+	// Modal overlay state (info modals - deprecated, using formOverlay instead)
 	modalOverlay ModalOverlayState
+
+	// Form overlay state (dual-purpose for edit/create)
+	formOverlay FormOverlayState
 }
 
 // budgetView returns a composable view for the left panel
@@ -437,7 +441,6 @@ func (m *chromaModel) targetView() *TargetPanelView {
 // Returns the rows, total income, and total expenses
 func buildRowsFromBudget(b *Data.Budget, month, year int) ([]rowData, float64, float64) {
 	var incomeRows, mandatoryRows, flexibleRows []rowData
-	var buffer float64
 	var totalIncome, totalExpenses float64
 
 	for _, entry := range b.Entries {
@@ -448,6 +451,7 @@ func buildRowsFromBudget(b *Data.Budget, month, year int) ([]rowData, float64, f
 				Category:   entry.Type,
 				Percentage: 0,
 				Realized:   entry.Realized,
+				MonthYear:  entry.MonthYear,
 			}
 
 			switch entry.Type {
@@ -461,7 +465,6 @@ func buildRowsFromBudget(b *Data.Budget, month, year int) ([]rowData, float64, f
 				flexibleRows = append(flexibleRows, row)
 				totalExpenses += entry.Value
 			}
-			buffer += entry.Value
 		}
 	}
 
@@ -492,7 +495,8 @@ func buildRowsFromBudget(b *Data.Budget, month, year int) ([]rowData, float64, f
 		rows = append(rows, rowData{Name: "─", Value: 0, Category: "Separator", Percentage: 0})
 	}
 
-	// 7. Buffer line
+	// 7. Buffer line - Income minus (Mandatory + Flexible)
+	buffer := totalIncome - totalExpenses
 	rows = append(rows, rowData{Name: "Buffer", Value: buffer, Category: "Buffer", Percentage: 0, Realized: false})
 
 	// Compute normalized percentages
@@ -611,11 +615,197 @@ func (m chromaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyPressMsg:
+	case tea.KeyMsg:
+		// Handle form overlay input if active
+		if m.formOverlay.Active {
+			keyStr := msg.String()
+
+			// Handle backspace
+			if keyStr == "backspace" {
+				if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields) {
+					field := &m.formOverlay.Config.Fields[m.formOverlay.FieldIndex]
+					if !field.ReadOnly && len(field.Value) > 0 {
+						field.Value = field.Value[:len(field.Value)-1]
+					}
+				}
+				return m, nil
+			}
+
+			// Handle enter key - save form data
+			if keyStr == "enter" {
+				var err error
+				switch m.formOverlay.Config.Type {
+				case CreateEntry:
+					name, month, year, value, catStr, realized, e := ParseEntryForm(m.formOverlay.Config.Fields)
+					if e != nil {
+						err = e
+					} else {
+						cat := Data.Category(catStr)
+						err = m.budget.NewEntry(name, month, year, value, cat, realized)
+					}
+				case EditEntry:
+					// Use OriginalID for lookup - don't allow ID change via form fields
+					id := m.formOverlay.OriginalID
+					_, name, month, year, value, catStr, realized, e := ParseEntryFormWithID(m.formOverlay.Config.Fields)
+					if e != nil {
+						err = e
+					} else {
+						m.budget.UpdateEntry(id, name, month, year, value, Data.Category(catStr), realized)
+					}
+				case CreateTarget:
+					name, year, value, sidePocket, e := ParseTargetForm(m.formOverlay.Config.Fields)
+					if e != nil {
+						err = e
+					} else {
+						err = m.budget.NewTarget(name, year, value, sidePocket)
+					}
+				case EditTarget:
+					id, name, _, value, sidePocket, e := ParseTargetFormWithID(m.formOverlay.Config.Fields)
+					if e != nil {
+						err = e
+					} else {
+						m.budget.UpdateTarget(id, name, value, sidePocket)
+					}
+				}
+				if err == nil {
+					m.formOverlay.Active = false
+					m.formOverlay.FieldIndex = 0
+					m.reloadRows() // Refresh display after save
+					if m.formOverlay.OnSave != nil {
+						m.formOverlay.OnSave()
+					}
+				} else {
+					// Show error in form
+					m.formOverlay.Error = err.Error()
+				}
+				return m, nil
+			}
+
+			// Handle escape
+			if keyStr == "esc" {
+				m.formOverlay.Active = false
+				m.formOverlay.FieldIndex = 0
+				return m, nil
+			}
+
+			// Handle tab
+			if keyStr == "tab" {
+				if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields) {
+					m.formOverlay.FieldIndex = len(m.formOverlay.Config.Fields)
+				} else {
+					m.formOverlay.FieldIndex = 0
+				}
+				return m, nil
+			}
+
+			// Handle navigation keys
+			switch keyStr {
+			case "up":
+				if m.formOverlay.FieldIndex > 0 {
+					m.formOverlay.FieldIndex--
+				} else if m.formOverlay.FieldIndex == len(m.formOverlay.Config.Fields) {
+					m.formOverlay.FieldIndex = len(m.formOverlay.Config.Fields) - 1
+				}
+				return m, nil
+
+			case "down":
+				if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields)-1 {
+					m.formOverlay.FieldIndex++
+				}
+				return m, nil
+
+			case "left":
+				// For Category and Realized fields, toggle/cycle the value
+				if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields) {
+					field := &m.formOverlay.Config.Fields[m.formOverlay.FieldIndex]
+					if !field.ReadOnly {
+						if field.Name == "Realized" {
+							if field.Value == "true" {
+								field.Value = "false"
+							} else {
+								field.Value = "true"
+							}
+						} else if field.Name == "Category" {
+							// Cycle backwards: Flexible -> Mandatory -> Income -> Flexible
+							switch field.Value {
+							case "Income":
+								field.Value = "Flexible"
+							case "Mandatory":
+								field.Value = "Income"
+							case "Flexible":
+								field.Value = "Mandatory"
+							}
+						}
+					}
+				}
+				return m, nil
+
+			case "right":
+				// For Category and Realized fields, toggle/cycle the value
+				if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields) {
+					field := &m.formOverlay.Config.Fields[m.formOverlay.FieldIndex]
+					if !field.ReadOnly {
+						if field.Name == "Realized" {
+							if field.Value == "true" {
+								field.Value = "false"
+							} else {
+								field.Value = "true"
+							}
+						} else if field.Name == "Category" {
+							// Cycle forwards: Income -> Mandatory -> Flexible -> Income
+							switch field.Value {
+							case "Income":
+								field.Value = "Mandatory"
+							case "Mandatory":
+								field.Value = "Flexible"
+							case "Flexible":
+								field.Value = "Income"
+							}
+						}
+					}
+				}
+				return m, nil
+			}
+
+			// Handle character input for editable fields (regular keys)
+			// Only add characters for non-special fields (Category and Realized use left/right)
+			if m.formOverlay.FieldIndex < len(m.formOverlay.Config.Fields) {
+				field := &m.formOverlay.Config.Fields[m.formOverlay.FieldIndex]
+				if !field.ReadOnly && len(keyStr) == 1 {
+					// Skip for Category and Realized fields (use left/right arrows instead)
+					if field.Name != "Category" && field.Name != "Realized" {
+						field.Value += keyStr
+					}
+				}
+			}
+			return m, nil
+		}
+
+		// Normal navigation when form is not active
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quit = true
 			return m, tea.Quit
+
+		case "e", "E":
+			// Open form for creating new Entry
+			cfg := NewEntryFormConfig("", 0, m.month, m.year, "Income", false, true)
+			m.formOverlay = FormOverlayState{
+				Active:     true,
+				Config:     cfg,
+				FieldIndex: 0,
+			}
+			return m, nil
+
+		case "t", "T":
+			// Open form for creating new Target
+			cfg := NewTargetFormConfig("", 0, 0, m.year, true)
+			m.formOverlay = FormOverlayState{
+				Active:     true,
+				Config:     cfg,
+				FieldIndex: 0,
+			}
+			return m, nil
 
 		case "tab":
 			// Switch focus between panels
@@ -655,32 +845,33 @@ func (m chromaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadRows()
 
 		case "enter":
-			// Show modal overlay with row details
-			if m.modalOverlay.Active {
-				// Close modal if already open
-				m.modalOverlay.Active = false
-			} else {
-				// Show modal for selected row
-				if m.activePanel == LeftPanel {
-					if len(m.leftRows) > 0 && m.leftSelected < len(m.leftRows) {
-						selectedRow := m.leftRows[m.leftSelected]
-						m.modalOverlay = NewBudgetInfoModal(
-							selectedRow.Name,
-							selectedRow.Value,
-							string(selectedRow.Category),
-						)
+			// Open edit form for selected row
+			if m.activePanel == LeftPanel {
+				if len(m.leftRows) > 0 && m.leftSelected < len(m.leftRows) {
+					row := m.leftRows[m.leftSelected]
+					// Skip separators
+					if row.Category != "Separator" && row.Name != "─" {
+						entryMonth := int(row.MonthYear.Month())
+						entryYear := row.MonthYear.Year()
+						cfg := NewEntryFormConfig(row.Name, row.Value, entryMonth, entryYear, string(row.Category), row.Realized, false)
+						// Store original ID for lookup during update (in case user modifies name/month/year)
+						originalID := row.Name + fmt.Sprintf("-%04d-%02d", entryYear, entryMonth)
+						m.formOverlay = FormOverlayState{
+							Active:     true,
+							Config:     cfg,
+							FieldIndex: 0,
+							OriginalID: originalID,
+						}
 					}
-				} else {
-					if len(m.rightRows) > 0 && m.rightSelected < len(m.rightRows) {
-						selectedRow := m.rightRows[m.rightSelected]
-						m.modalOverlay = NewTargetInfoModal(
-							selectedRow.Name,
-							selectedRow.Value,
-							selectedRow.CurrentPlanned,
-							selectedRow.CurrentRealized,
-							selectedRow.SidePocket,
-							selectedRow.Remaining,
-						)
+				}
+			} else {
+				if len(m.rightRows) > 0 && m.rightSelected < len(m.rightRows) {
+					row := m.rightRows[m.rightSelected]
+					cfg := NewTargetFormConfig(row.Name, row.Value, row.SidePocket, m.year, false)
+					m.formOverlay = FormOverlayState{
+						Active:     true,
+						Config:     cfg,
+						FieldIndex: 0,
 					}
 				}
 			}
@@ -800,16 +991,16 @@ func (m chromaModel) View() tea.View {
 
 	baseView := "\n" + combined + "\n" + helpText + "\n"
 
-	// Render modal overlay if active
-	if m.modalOverlay.Active {
-		modalView := RenderModal(m.modalOverlay)
-		// Center the modal over the base view
+	// Render form overlay if active
+	if m.formOverlay.Active {
+		formView := RenderForm(m.formOverlay, &FormError{Message: m.formOverlay.Error})
+		// Center the form over the base view
 		baseView = lipgloss.Place(
 			100, // max width
 			50,  // max height
 			lipgloss.Center,
 			lipgloss.Center,
-			modalView,
+			formView,
 		)
 	}
 
@@ -820,16 +1011,12 @@ func (m chromaModel) View() tea.View {
 func (m chromaModel) renderHelpText() string {
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 
-	focusIndicator := " [LEFT]"
-	if m.activePanel == RightPanel {
-		focusIndicator = " [RIGHT]"
-	}
-
 	helpText := helpStyle.Render(
-		"↑/↓ or W/S: Navigate rows" + focusIndicator +
+		"↑/↓ or W/S: Navigate" +
 			" | ←/→ or A/D: Change month" +
 			" | Tab: Switch panel" +
-			" | Enter: Info" +
+			" | Enter: Edit" +
+			" | E/T: New Entry/Target" +
 			" | Q: Quit",
 	)
 
