@@ -398,6 +398,9 @@ type chromaModel struct {
 	// Shared styling data
 	totalIncome   float64
 	totalExpenses float64
+
+	// Modal overlay state
+	modalOverlay ModalOverlayState
 }
 
 // budgetView returns a composable view for the left panel
@@ -652,18 +655,29 @@ func (m chromaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadRows()
 
 		case "enter":
-			// Placeholder handler for future row editing
-			if m.activePanel == LeftPanel {
-				if len(m.leftRows) > 0 && m.leftSelected < len(m.leftRows) {
-					selectedRow := m.leftRows[m.leftSelected]
-					return m, tea.Printf("Selected Budget: %s (%.2f) - Category: %s",
-						selectedRow.Name, selectedRow.Value, selectedRow.Category)
-				}
+			// Show modal overlay with row details
+			if m.modalOverlay.Active {
+				// Close modal if already open
+				m.modalOverlay.Active = false
 			} else {
-				if len(m.rightRows) > 0 && m.rightSelected < len(m.rightRows) {
-					selectedRow := m.rightRows[m.rightSelected]
-					return m, tea.Printf("Selected Target: %s (Remaining: %.2f)",
-						selectedRow.Name, selectedRow.Remaining)
+				// Show modal for selected row
+				if m.activePanel == LeftPanel {
+					if len(m.leftRows) > 0 && m.leftSelected < len(m.leftRows) {
+						selectedRow := m.leftRows[m.leftSelected]
+						m.modalOverlay = NewBudgetInfoModal(
+							selectedRow.Name,
+							selectedRow.Value,
+							string(selectedRow.Category),
+						)
+					}
+				} else {
+					if len(m.rightRows) > 0 && m.rightSelected < len(m.rightRows) {
+						selectedRow := m.rightRows[m.rightSelected]
+						m.modalOverlay = NewTargetInfoModal(
+							selectedRow.Name,
+							selectedRow.Remaining,
+						)
+					}
 				}
 			}
 		}
@@ -780,7 +794,22 @@ func (m chromaModel) View() tea.View {
 	// Help text
 	helpText := m.renderHelpText()
 
-	return tea.NewView("\n" + combined + "\n" + helpText + "\n")
+	baseView := "\n" + combined + "\n" + helpText + "\n"
+
+	// Render modal overlay if active
+	if m.modalOverlay.Active {
+		modalView := RenderModal(m.modalOverlay)
+		// Center the modal over the base view
+		baseView = lipgloss.Place(
+			100, // max width
+			50,  // max height
+			lipgloss.Center,
+			lipgloss.Center,
+			modalView,
+		)
+	}
+
+	return tea.NewView(baseView)
 }
 
 // renderHelpText returns the help text at the bottom of the view
