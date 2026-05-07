@@ -32,7 +32,7 @@ func main() {
 
 	//USE BUDGET SECTION - LIVE APP
 
-	TUI.RenderTableMonth(&budget, 2, 2026)
+	TUI.RunCustomTable(&budget, 2, 2026)
 
 	// ON CLOSURE: SAVE BUDGET + SAVE CONFIG
 	if cfg.LastBudgetPath == "" {
